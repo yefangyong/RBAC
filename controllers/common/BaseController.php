@@ -137,7 +137,7 @@ class BaseController extends Controller
      * @param int $code
      * 封装返回的JSON数据，用于前端js ajax交互
      */
-    public function renderJson($data = [],$msg = 'ok',$code = 200) {
+    public function show($data = [],$msg = 'ok',$code = 200) {
         header("Content-type:application/json");
         echo json_encode([
             'data'=>$data,

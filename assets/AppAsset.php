@@ -41,7 +41,7 @@ class AppAsset extends AssetBundle
         ];
 
         $this->js = [
-            UrlService::buildUrl("/jquery/jquery.min.js"),
+            //UrlService::buildUrl("/jquery/jquery-3.0.0.min.js"),
             UrlService::buildUrl("/bootstrap/js/bootstrap.min.js")
         ];
 
