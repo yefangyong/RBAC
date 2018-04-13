@@ -9,7 +9,12 @@
 namespace app\controllers\common;
 
 
+use app\models\Access;
+use app\models\AppAccessLog;
+use app\models\Role;
+use app\models\RoleAccess;
 use app\models\User;
+use app\models\UserRole;
 use app\services\UrlService;
 use yii\web\Controller;
 use yii\web\Cookie;
@@ -25,6 +30,8 @@ class BaseController extends Controller
         'user/login',
         'user/vlogin'
     ];
+
+    public $privilege_urls = [];
 
     public $ignore_url = [
         'error/forbidden' ,
@@ -45,23 +52,89 @@ class BaseController extends Controller
 
     /**
      * @param \yii\base\Action $action
-     * @return bool|void|\yii\web\Response
-     * 拦截器，所有方法之前所使用的方法
+     * @return bool
+     * 拦截器，进行权限验证
      */
     public function beforeAction($action)
     {
         $login_status = $this->checkLoginStatus();
         if ( !$login_status && !in_array( $action->uniqueId,$this->allowAllAction )  ) {
             if(\Yii::$app->request->isAjax){
-                $this->renderJSON([],"未登录,请返回用户中心",-302);
+                $this->show([],"未登录,请返回用户中心",-302);
             }else{
                 $this->redirect( UrlService::buildUrl("/user/login") );//返回到登录页面
             }
             return false;
         }
+        /**
+         * 操作日志记录到数据库
+         */
+        $get = $this->get(null);
+        $post = $this->post(null);
+        $app_access_log_model = new AppAccessLog();
+        $app_access_log_model->uid = $this->current_user['id'] ? $this->current_user['id'] : 0;
+        $app_access_log_model->target_url = $_SERVER['REQUEST_URI'] ? $_SERVER['REQUEST_URI'] : '';
+        $app_access_log_model->create_time  = time();
+        $app_access_log_model->ip = $_SERVER['REMOTE_ADDR'] ? $_SERVER['REMOTE_ADDR'] : '';
+        $app_access_log_model->ua = $_SERVER['HTTP_USER_AGENT'] ? $_SERVER['HTTP_USER_AGENT'] : '';
+        $app_access_log_model->query_params = json_encode(array_merge($get,$post));
+        $app_access_log_model->save(0);
+
+        /**
+         * 判断权限的逻辑
+         * 获取用户所选择的角色
+         * 获取角色所对应的权限
+         * 获取权限列表中的URL
+         * 判断当前的URL是否在其中
+         */
+        if(!$this->checkPrivilege($action->uniqueId)) {
+            $this->redirect(UrlService::buildUrl("/error/forbidden"));
+            return false;
+        }
         return true;
 
+    }
 
+    /**
+     * @param $url
+     * @return bool
+     * 检查权限
+     */
+    public function checkPrivilege($url) {
+        if($this->current_user && $this->current_user['is_admin']) {
+            return true;
+        }
+        if(in_array($url,$this->ignore_url)) {
+            return true;
+        }
+        return in_array($url,$this->getRolePrivilege());
+    }
+
+    /**
+     * @param int $uid
+     * @return array
+     * 获取角色的权限链接
+     */
+    public function getRolePrivilege($uid = 0) {
+        if(!$uid && $this->current_user) {
+            $uid = $this->current_user->id;
+        }
+        if(!$this->privilege_urls) {
+            $role_ids = UserRole::find()->where(array('uid'=>$uid))->select('role_id')->asArray()->column();
+            if($role_ids) {
+                //通过角色取出权限关系
+                $access_ids = RoleAccess::find()->where(array('role_id'=>$role_ids))->select('access_id')->asArray()->column();
+                //在权限表中取出所有的权限关系
+                $list = Access::find()->where(array('id'=>$access_ids))->all();
+                if($list) {
+                    foreach ($list as $item) {
+                        $tmp_urls = json_decode($item['urls']);
+                        $this->privilege_urls = array_merge($this->privilege_urls,$tmp_urls);
+                    }
+                }
+            }
+        }
+        return $this->privilege_urls;
     }
 
     /**
